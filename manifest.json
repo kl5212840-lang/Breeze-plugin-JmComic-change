@@ -1,0 +1,87 @@
+{
+  "name": "禁漫天堂(mumushu0501-boop)",
+  "uuid": "6886291b-f524-441c-844b-c2efae9899a9",
+  "iconUrl": "https://raw.githubusercontent.com/Mumushu0501-boop/Breeze-plugin-JmComic-change/main/assets/fO.webp",
+  "creator": {
+    "name": "Mumushu0501-boop",
+    "describe": "https://github.com/Mumushu0501-boop"
+  },
+  "describe": "禁漫天堂插件（含评论(实验）、线路测速、图片多线路回退）",
+  "version": "0.2.0",
+  "pageImageDecode": {
+    "type": "jmSegmentation"
+  },
+  "home": "https://github.com/Mumushu0501-boop/Breeze-plugin-JmComic-change",
+  "updateUrl": "https://api.github.com/repos/Mumushu0501-boop/Breeze-plugin-JmComic-change/releases/latest",
+  "function": [
+    {
+      "id": "recommend",
+      "title": "推荐",
+      "action": {
+        "type": "openPluginFunction",
+        "payload": {
+          "id": "recommend",
+          "title": "推荐",
+          "presentation": "page"
+        }
+      }
+    },
+    {
+      "id": "latest",
+      "title": "最新",
+      "action": {
+        "type": "openComicList",
+        "payload": {
+          "scene": {
+            "title": "最新",
+            "source": "6886291b-f524-441c-844b-c2efae9899a9",
+            "list": {
+              "fnPath": "getLatestData",
+              "core": {},
+              "extern": {
+                "source": "latest"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "ranking",
+      "title": "排行榜",
+      "action": {
+        "type": "openComicList",
+        "payload": {
+          "scene": {
+            "title": "禁漫排行榜",
+            "source": "6886291b-f524-441c-844b-c2efae9899a9",
+            "list": {
+              "fnPath": "getRankingData",
+              "core": {},
+              "extern": {
+                "source": "ranking"
+              }
+            },
+            "filter": {
+              "fnPath": "getRankingFilterBundle",
+              "core": {},
+              "extern": {
+                "source": "ranking"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "id": "cloudFavorite",
+      "title": "云端收藏",
+      "action": {
+        "type": "openCloudFavorite",
+        "payload": {
+          "title": "云端收藏"
+        }
+      }
+    }
+  ]
+}
