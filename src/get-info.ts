@@ -1,10 +1,10 @@
 // 本插件使用**自有 uuid**，与官方禁漫插件（bf99008d-010b-4f17-ac7c-61a9b57dc3d9）
 // 作为两个独立条目并存，互不覆盖。
 //
-// 注意：Breeze 宿主目前把官方 uuid 硬编码为页图反混淆开关
-// （lib/network/http/picture/picture.dart 的 _kJmPluginUuid），所以换 uuid 后
-// 宿主不会自动反混淆，页面图会呈现分块错乱。为此本插件在 getInfo 里声明
-// `pageImageDecode`；宿主支持该声明后即恢复正常。
+// 注意：Breeze 3.0.33 及更早版本把官方 uuid 硬编码为页图反混淆开关
+// （lib/network/http/picture/picture.dart 的 _kJmPluginUuid），换 uuid 后不会反混淆、
+// 页面图会分块错乱。自 3.0.34 起宿主改为询问插件：本插件在 index.ts 导出
+// `isJm()` 返回 true 即可触发反混淆，因此 uuid 可以自由更换。
 const JM_PLUGIN_ID = "6886291b-f524-441c-844b-c2efae9899a9";
 
 type Scene = Record<string, unknown>;
@@ -25,9 +25,7 @@ export function buildPluginInfo(input: BuildPluginInfoInput) {
       describe: "https://github.com/Mumushu0501-boop",
     },
     describe: "禁漫天堂插件（含评论(实验）、线路测速、图片多线路回退）",
-    version: "0.2.0",
-    // 页面图由服务端分块打乱，声明后由宿主在落盘前重排还原（禁漫反混淆）。
-    pageImageDecode: { type: "jmSegmentation" },
+    version: "0.2.1",
     home: "https://github.com/Mumushu0501-boop/Breeze-plugin-JmComic-change",
     updateUrl:
       "https://api.github.com/repos/Mumushu0501-boop/Breeze-plugin-JmComic-change/releases/latest",

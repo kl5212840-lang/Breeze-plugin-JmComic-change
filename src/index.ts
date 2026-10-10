@@ -975,6 +975,14 @@ async function isJmLoggedIn(): Promise<boolean> {
   return jwt.length > 0;
 }
 
+/**
+ * 告知宿主本插件为禁漫：页面图由服务端分块打乱，需宿主在落盘前重排还原。
+ * Breeze 3.0.34+ 会调用该导出；更早的版本会忽略它，无副作用。
+ */
+async function isJm() {
+  return true;
+}
+
 let commentEnabledCache = { value: false, at: 0 };
 
 /**
@@ -3610,6 +3618,7 @@ export default {
   measureEndpointSpeeds,
   onNetworkChanged,
   onCommentChanged,
+  isJm,
   getHomeLatestData,
   getRankingData,
   getPromoteListData,
