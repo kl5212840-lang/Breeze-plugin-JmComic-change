@@ -1,15 +1,31 @@
 {
-  "name": "禁漫天堂(mumushu0501-boop)",
+  "name": "禁漫天堂+",
   "uuid": "6886291b-f524-441c-844b-c2efae9899a9",
-  "iconUrl": "https://raw.githubusercontent.com/Mumushu0501-boop/Breeze-plugin-JmComic-change/main/assets/fO.webp",
+  "iconUrl": "https://raw.githubusercontent.com/kl5212840-lang/Breeze-plugin-JmComic-change/main/assets/fO.webp",
   "creator": {
-    "name": "Mumushu0501-boop",
-    "describe": "https://github.com/Mumushu0501-boop"
+    "name": "kl5212840-lang · 基于 mumushu0501-boop",
+    "describe": "https://github.com/mumushu0501-boop/Breeze-plugin-JmComic-change"
   },
-  "describe": "禁漫天堂插件（含评论(实验）、线路测速、图片多线路回退）",
-  "version": "0.2.1",
-  "home": "https://github.com/Mumushu0501-boop/Breeze-plugin-JmComic-change",
-  "updateUrl": "https://api.github.com/repos/Mumushu0501-boop/Breeze-plugin-JmComic-change/releases/latest",
+  "describe": "禁漫天堂插件：个人页、收藏、签到与多线路回退",
+  "version": "0.3.0",
+  "home": "https://github.com/kl5212840-lang/Breeze-plugin-JmComic-change",
+  "updateUrl": "https://api.github.com/repos/kl5212840-lang/Breeze-plugin-JmComic-change/releases/latest",
+  "breezeExperience": {
+    "profileTab": true,
+    "profileKind": "jm",
+    "profileCheckinFunction": "checkInToday",
+    "profileNotificationsFunction": "getNotifications",
+    "legacySources": [],
+    "searchQuickCategories": [
+      "同人",
+      "单本",
+      "短篇",
+      "韩漫",
+      "CG图集",
+      "3D",
+      "Cosplay"
+    ]
+  },
   "function": [
     {
       "id": "recommend",
@@ -19,6 +35,18 @@
         "payload": {
           "id": "recommend",
           "title": "推荐",
+          "presentation": "page"
+        }
+      }
+    },
+    {
+      "id": "categories",
+      "title": "分类",
+      "action": {
+        "type": "openPluginFunction",
+        "payload": {
+          "id": "categories",
+          "title": "分类",
           "presentation": "page"
         }
       }
@@ -67,16 +95,6 @@
               }
             }
           }
-        }
-      }
-    },
-    {
-      "id": "cloudFavorite",
-      "title": "云端收藏",
-      "action": {
-        "type": "openCloudFavorite",
-        "payload": {
-          "title": "云端收藏"
         }
       }
     }

@@ -16,19 +16,35 @@ type BuildPluginInfoInput = {
 
 export function buildPluginInfo(input: BuildPluginInfoInput) {
   return {
-    name: "禁漫天堂(mumushu0501-boop)",
+    name: "禁漫天堂+",
     uuid: JM_PLUGIN_ID,
     iconUrl:
-      "https://raw.githubusercontent.com/Mumushu0501-boop/Breeze-plugin-JmComic-change/main/assets/fO.webp",
+      "https://raw.githubusercontent.com/kl5212840-lang/Breeze-plugin-JmComic-change/main/assets/fO.webp",
     creator: {
-      name: "Mumushu0501-boop",
-      describe: "https://github.com/Mumushu0501-boop",
+      name: "kl5212840-lang · 基于 mumushu0501-boop",
+      describe: "https://github.com/mumushu0501-boop/Breeze-plugin-JmComic-change",
     },
-    describe: "禁漫天堂插件（含评论(实验）、线路测速、图片多线路回退）",
-    version: "0.2.1",
-    home: "https://github.com/Mumushu0501-boop/Breeze-plugin-JmComic-change",
+    describe: "禁漫天堂插件：个人页、收藏、签到与多线路回退",
+    version: "0.3.0",
+    home: "https://github.com/kl5212840-lang/Breeze-plugin-JmComic-change",
     updateUrl:
-      "https://api.github.com/repos/Mumushu0501-boop/Breeze-plugin-JmComic-change/releases/latest",
+      "https://api.github.com/repos/kl5212840-lang/Breeze-plugin-JmComic-change/releases/latest",
+    breezeExperience: {
+      profileTab: true,
+      profileKind: "jm",
+      profileCheckinFunction: "checkInToday",
+      profileNotificationsFunction: "getNotifications",
+      legacySources: [],
+      searchQuickCategories: [
+        "同人",
+        "单本",
+        "短篇",
+        "韩漫",
+        "CG图集",
+        "3D",
+        "Cosplay",
+      ],
+    },
     function: [
       {
         id: "recommend",
@@ -38,6 +54,18 @@ export function buildPluginInfo(input: BuildPluginInfoInput) {
           payload: {
             id: "recommend",
             title: "推荐",
+            presentation: "page" as const,
+          },
+        },
+      },
+      {
+        id: "categories",
+        title: "分类",
+        action: {
+          type: "openPluginFunction" as const,
+          payload: {
+            id: "categories",
+            title: "分类",
             presentation: "page" as const,
           },
         },
@@ -56,14 +84,6 @@ export function buildPluginInfo(input: BuildPluginInfoInput) {
         action: {
           type: "openComicList" as const,
           payload: { scene: input.buildRankingScene() },
-        },
-      },
-      {
-        id: "cloudFavorite",
-        title: "云端收藏",
-        action: {
-          type: "openCloudFavorite" as const,
-          payload: { title: "云端收藏" },
         },
       },
     ],

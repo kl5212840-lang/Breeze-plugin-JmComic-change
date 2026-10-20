@@ -10,7 +10,6 @@ export function resolveServerMessage(data: unknown, fallback: string): string {
 }
 
 export function toFriendlyNetworkError(err: unknown): string {
-  console.log(err);
   const code = String((err as { code?: string } | null)?.code || "");
   const message = String(
     (err as { message?: string } | null)?.message || "",
@@ -29,7 +28,6 @@ export function toFriendlyNetworkError(err: unknown): string {
 }
 
 export function toFriendlyError(err: unknown): Error {
-  console.error(`禁漫请求失败: ${err}`);
   if (err instanceof Error && err.message.trim()) {
     return err;
   }

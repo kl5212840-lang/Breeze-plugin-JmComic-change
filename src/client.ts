@@ -91,17 +91,12 @@ export function createJmClient() {
     const status = Number(response.status || 0);
 
     if (status < 200 || status >= 300) {
-      console.error(
-        `服务器响应异常 (${status || "unknown"}) ${JSON.stringify(decoded)}`,
-      );
+      console.warn(`[jm.http] request failed status=${status || "unknown"}`);
       const serverMsg = resolveServerMessage(
         decoded,
         `服务器响应异常 (${status || "unknown"})`,
       );
       if (isLoginRequest(cfg.url)) {
-        console.error(
-          `[jm.login] failed status=${status || "unknown"} message=${serverMsg} body=${JSON.stringify(decoded)}`,
-        );
         if (status === 401 || looksLikeCredentialError(serverMsg)) {
           throw new Error(serverMsg || "账号或密码错误");
         }
@@ -116,9 +111,7 @@ export function createJmClient() {
     if (isLoginRequest(cfg.url)) {
       const serverMsg = resolveServerMessage(decoded, "");
       if (looksLikeCredentialError(serverMsg)) {
-        console.error(
-          `[jm.login] credential_error message=${serverMsg} body=${JSON.stringify(decoded)}`,
-        );
+        console.warn("[jm.login] credentials rejected");
       }
     }
 

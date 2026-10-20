@@ -214,7 +214,7 @@ async function fetchImageBytes({
     } catch (error) {
       lastError = error;
       noteImageBaseFailure(attempt);
-      console.warn(`[fetchImageBytes] 线路失败，尝试备用 ${attempt}`, error);
+      console.warn("[jm.image] current route failed; trying next route");
     }
   }
 
@@ -1089,7 +1089,7 @@ async function probeEndpoint(
       checkedAt: Date.now(),
     };
   } catch (error) {
-    console.warn(`[jm.speed] ${url} 不可用`, error);
+    console.warn("[jm.speed] route unavailable");
     return {
       url,
       ok: false,
@@ -1363,6 +1363,12 @@ async function getUserInfoBundle(): Promise<UserInfoBundleContract> {
       ],
       extern: {
         uid: String(user.uid ?? ""),
+        name: username,
+        level,
+        title: levelName,
+        coin,
+        experience: exp,
+        nextLevelExperience: nextLevelExp,
       },
     },
   };
@@ -1413,9 +1419,7 @@ async function loginWithPassword(payload: JmLoginPayload = {}) {
       useJwt: false,
     });
   } catch (error) {
-    console.error(
-      `[jm.login] request failed path=${path} accountLen=${account.length} message=${String((error as { message?: string } | null)?.message || error)}`,
-    );
+    console.warn("[jm.login] request failed");
     throw error;
   }
 
@@ -1617,7 +1621,7 @@ async function resolveFastestBases() {
       imageCandidates = dynamic.imageBaseUrls;
     }
   } catch (error) {
-    console.warn("[jm.init] resolve dynamic hosts failed", error);
+    console.warn("[jm.init] resolve dynamic hosts failed");
   }
 
   Config.baseUrls = baseCandidates;
@@ -1626,13 +1630,13 @@ async function resolveFastestBases() {
   try {
     Config.baseUrlIndex = await getFastestUrlIndex(Config.baseUrls);
   } catch (error) {
-    console.warn("[jm.init] choose fastest api base failed", error);
+    console.warn("[jm.init] choose fastest api base failed");
   }
 
   try {
     Config.imagesUrlIndex = await getFastestUrlIndex(Config.imagesUrls);
   } catch (error) {
-    console.warn("[jm.init] choose fastest image base failed", error);
+    console.warn("[jm.init] choose fastest image base failed");
   }
 
   // 用户固定线路优先于测速结果（候选列表全部保留，供失败时回退）
@@ -1648,7 +1652,7 @@ async function resolveFastestBases() {
       hostPool: baseCandidates,
     });
   } catch (error) {
-    console.warn("[jm.init] cache hostRuntime endpoints failed", error);
+    console.warn("[jm.init] cache hostRuntime endpoints failed");
   }
 
   return { data };
@@ -1711,7 +1715,7 @@ async function tryJmCheckin() {
 
       return true;
     } catch (error) {
-      console.error("签到出错", error);
+      console.warn("[jm.checkin] request failed");
       retryCount++;
       if (retryCount > maxRetries) {
         console.error("禁漫签到失败");
@@ -1722,6 +1726,63 @@ async function tryJmCheckin() {
   }
 
   return false;
+}
+
+async function checkInToday() {
+  const user = await loadPluginSetting("auth.userInfo", {});
+  if (!user?.uid) {
+    throw await buildUnauthorizedError("请先登录禁漫账号");
+  }
+  const ok = await tryJmCheckin();
+  return {
+    source: JM_PLUGIN_ID,
+    data: {
+      ok,
+      message: ok ? "今日签到已完成" : "签到未完成，请检查线路后重试",
+    },
+  };
+}
+
+async function getNotifications() {
+  const raw = await jmRequest({
+    path: `${Config.baseUrl}/notifications`,
+    method: "GET",
+    cache: false,
+    useJwt: true,
+  });
+  const root = toStringMap(raw);
+  const rows = Array.isArray(raw)
+    ? raw
+    : Array.isArray(root.list)
+      ? root.list
+      : Array.isArray(toStringMap(root.data).list)
+        ? toStringMap(root.data).list as unknown[]
+        : [];
+  const items = rows.map((value: unknown) => {
+    const item = toStringMap(value);
+    const content = Array.isArray(item.content)
+      ? item.content
+          .map((entry) => {
+            const detail = toStringMap(entry);
+            return String(detail.name ?? detail.title ?? detail.album_name ?? "").trim();
+          })
+          .filter(Boolean)
+          .join("、")
+      : String(item.content ?? "");
+    const readValue = item.read;
+    return {
+      id: String(item.id ?? ""),
+      title: String(item.title ?? "通知"),
+      content,
+      time: String(item.date ?? item.time ?? ""),
+      read: readValue === true || readValue === 1 || readValue === "1" || readValue === "true",
+      type: String(item.type ?? ""),
+    };
+  });
+  return {
+    source: JM_PLUGIN_ID,
+    data: { items, total: toNum(root.total, items.length) },
+  };
 }
 
 async function runJmAuthAndCheckInLoop() {
@@ -1742,13 +1803,11 @@ async function runJmAuthAndCheckInLoop() {
           return;
         }
 
-        const data = await loginWithPassword({
+        await loginWithPassword({
           account,
           password,
           path: `${Config.baseUrl}/login`,
         });
-
-        console.info(data);
 
         const checkedIn = await tryJmCheckin();
         if (!checkedIn) {
@@ -1759,10 +1818,7 @@ async function runJmAuthAndCheckInLoop() {
         return;
       } catch (error) {
         const delay = randomRetryDelayMs();
-        console.warn(
-          `[jm.init] login/checkin failed, retry in ${delay}ms`,
-          error,
-        );
+        console.warn(`[jm.init] login/checkin failed; retry in ${delay}ms`);
         await waitMs(delay);
       }
     }
@@ -1955,16 +2011,51 @@ async function getFunctionPage(
   payload: Record<string, unknown> = {},
 ): Promise<FunctionPageContract> {
   const id = String(payload.id ?? toStringMap(payload.core).id ?? "").trim();
+  if (id === "categories") {
+    const categories = [
+      ["同人", "doujin", "系列与角色同人", "people"],
+      ["单本", "single", "完整单册", "menu_book"],
+      ["短篇", "short", "碎片时间阅读", "auto_stories"],
+      ["韩漫", "hanman", "纵向阅读作品", "view_day"],
+      ["CG 图集", "doujin_CG", "图集与插画", "collections"],
+      ["3D", "another_3d", "三维作品", "view_in_ar"],
+      ["Cosplay", "another_cosplay", "角色扮演", "theater_comedy"],
+      ["禁漫汉化组", "禁漫汉化组", "汉化作品", "translate"],
+    ].map(([title, type, subtitle, icon]) => ({
+      title,
+      subtitle,
+      icon,
+      action: openComicListAction(buildComicListScene({
+        title,
+        list: {
+          fnPath: "getRankingData",
+          extern: { source: "ranking", type, order: "new" },
+        },
+        filter: {
+          fnPath: "getRankingFilterBundle",
+          extern: { source: "ranking", type, order: "new" },
+        },
+      })),
+    }));
+    return {
+      source: JM_PLUGIN_ID,
+      scheme: {
+        version: "1.0.0",
+        type: "page",
+        title: "分类",
+        body: {
+          type: "list" as const,
+          children: [{ type: "source-category-grid" as const, key: "categories" }],
+        } as any,
+      },
+      data: { categories, hasReachedMax: true },
+    };
+  }
   if (id !== "recommend") {
     throw new Error(`未知功能: ${id}`);
   }
 
   const recommend = await getHomeRecommendData();
-  console.log(
-    JSON.stringify(recommend, (key, value) =>
-      key === "items" || key === "raw" ? undefined : value,
-    ),
-  );
   const sections = Array.isArray((recommend as any)?.data?.sections)
     ? (recommend as any).data.sections
     : [];
@@ -1983,16 +2074,12 @@ async function getFunctionPage(
         type: "comic-list",
         direction: "horizontal",
         key: "items",
+        titleBelow: true,
       },
       items: Array.isArray(section?.items) ? section.items : [],
       raw: section?.raw ?? section,
     }));
 
-  console.log(
-    JSON.stringify(pickedSections, (key, value) =>
-      key === "items" || key === "raw" ? undefined : value,
-    ),
-  );
 
   return {
     source: JM_PLUGIN_ID,
@@ -2035,7 +2122,11 @@ async function getComicListSceneBundle(): Promise<ComicListSceneBundleContract> 
   };
 }
 
-async function getRankingFilterBundle(): Promise<FilterBundleContract> {
+async function getRankingFilterBundle(
+  payload: { extern?: Record<string, unknown> } = {},
+): Promise<FilterBundleContract> {
+  const extern = toStringMap(payload.extern);
+  const selectedType = String(extern.type ?? "latest");
   return {
     source: JM_PLUGIN_ID,
     scheme: {
@@ -2059,8 +2150,10 @@ async function getRankingFilterBundle(): Promise<FilterBundleContract> {
     },
     data: {
       values: {
-        category: "latest",
-        order: "new",
+        category: selectedType === "禁漫汉化组"
+          ? "jm_translation_team"
+          : selectedType,
+        order: String(extern.order ?? "new"),
       },
     },
   };
@@ -2190,7 +2283,7 @@ async function dumpRuntimeInfo() {
 function timestampToIso(value: unknown): string {
   const seconds = toNum(value, 0);
   if (seconds <= 0) {
-    return new Date().toISOString();
+    return "";
   }
   return new Date(seconds * 1000).toISOString();
 }
@@ -2244,12 +2337,15 @@ async function getComicDetail(
       title: normalizedInfo.name,
       titleMeta: [
         createActionItem(`浏览：${toNum(normalizedInfo.total_views)}`),
-        createActionItem(`更新时间：${timestampToIso(normalizedInfo.addtime)}`),
+        ...(timestampToIso(normalizedInfo.addtime)
+          ? [createActionItem(`更新：${timestampToIso(normalizedInfo.addtime).slice(0, 10)}`)]
+          : []),
         createActionItem(
           `章节数：${normalizedInfo.series.length > 0 ? normalizedInfo.series.length : 1}`,
         ),
-        createActionItem(`总页数：${toNum(response.total_photos)}`),
-        createActionItem(`禁漫车：jm${normalizedInfo.id}`),
+        ...(toNum(response.total_photos) > 0
+          ? [createActionItem(`页数：${toNum(response.total_photos)}`)]
+          : []),
       ],
       creator: {
         id: "",
@@ -2729,7 +2825,6 @@ async function getRankingData(payload: JmRankingPayload = {}) {
 }
 
 async function getPromoteListData(payload: JmPromoteListPayload = {}) {
-  console.debug(payload);
   const id = toNum(payload.id, 0);
   const page = Math.max(0, toNum(payload.page, 0));
   const path = `${Config.baseUrl}/promote_list`;
@@ -2813,7 +2908,6 @@ async function getLatestData(payload: JmRankingPayload = {}) {
     jwtToken: payload.jwtToken,
   });
 
-  console.debug(raw);
 
   const list = Array.isArray(raw) ? raw : [];
   return {
@@ -2922,7 +3016,6 @@ async function toggleFavorite(
     jwtToken: payload.jwtToken,
   });
 
-  console.debug("res", res);
 
   if (res?.msg?.includes("已满")) {
     flutterTools.showToast({ message: "收藏数已达上限", level: "warning" });
@@ -3321,7 +3414,6 @@ async function getWeekRankingData(payload: JmWeekRankingPayload = {}) {
 }
 
 async function getChapter(payload: JmChapterPayload = {}) {
-  console.debug(payload);
   const chapterId = String(payload.chapterId ?? "").trim();
   if (!chapterId) {
     throw new Error("chapterId 不能为空");
@@ -3394,7 +3486,6 @@ async function getChapter(payload: JmChapterPayload = {}) {
 }
 
 async function getReadSnapshot(payload: JmReadSnapshotPayload = {}) {
-  console.debug(payload);
   const comicId = String(payload.comicId ?? "").trim();
   if (!comicId) {
     throw new Error("comicId 不能为空");
@@ -3601,6 +3692,8 @@ export default {
   getComicDetail,
   getSettingsBundle,
   getUserInfoBundle,
+  checkInToday,
+  getNotifications,
   getLoginBundle,
   loginWithPassword,
   getCapabilitiesBundle,

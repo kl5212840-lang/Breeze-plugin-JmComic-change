@@ -153,7 +153,7 @@ export async function setCachedResponse(
       value,
     });
   } catch (err) {
-    console.error("setCachedResponse failed", err);
+    console.warn("[jm.cache] save failed");
   }
 }
 
