@@ -1758,7 +1758,10 @@ async function getNotifications() {
       : Array.isArray(toStringMap(root.data).list)
         ? toStringMap(root.data).list as unknown[]
         : [];
-  const items = rows.map((value: unknown) => {
+  const items = rows.filter((value: unknown) => {
+    const item = toStringMap(value);
+    return !String(item.content ?? "").includes("/payment?");
+  }).map((value: unknown) => {
     const item = toStringMap(value);
     const content = Array.isArray(item.content)
       ? item.content
@@ -1768,7 +1771,7 @@ async function getNotifications() {
           })
           .filter(Boolean)
           .join("、")
-      : String(item.content ?? "");
+      : formatNotificationText(item.content);
     const readValue = item.read;
     return {
       id: String(item.id ?? ""),
@@ -1783,6 +1786,29 @@ async function getNotifications() {
     source: JM_PLUGIN_ID,
     data: { items, total: toNum(root.total, items.length) },
   };
+}
+
+function formatNotificationText(value: unknown): string {
+  const entities: Record<string, string> = {
+    amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " ",
+  };
+  return String(value ?? "")
+    .replace(/<br\s*\/?\s*>|<\/p\s*>/gi, "\n")
+    .replace(/<[^>]*>/g, " ")
+    .replace(/&(#x[0-9a-f]+|#[0-9]+|[a-z]+);/gi, (match, entity: string) => {
+      const lower = entity.toLowerCase();
+      if (lower.startsWith("#")) {
+        const hex = lower.startsWith("#x");
+        const point = Number.parseInt(lower.slice(hex ? 2 : 1), hex ? 16 : 10);
+        return Number.isFinite(point) && point > 0 && point <= 0x10ffff
+          ? String.fromCodePoint(point)
+          : match;
+      }
+      return entities[lower] ?? match;
+    })
+    .replace(/[^\S\n]+/g, " ")
+    .replace(/ *\n+ */g, "\n")
+    .trim();
 }
 
 async function runJmAuthAndCheckInLoop() {
