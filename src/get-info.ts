@@ -25,7 +25,7 @@ export function buildPluginInfo(input: BuildPluginInfoInput) {
       describe: "https://github.com/mumushu0501-boop/Breeze-plugin-JmComic-change",
     },
     describe: "禁漫天堂插件：个人页、收藏、签到与多线路回退",
-    version: "0.3.1",
+    version: "0.3.2",
     home: "https://github.com/kl5212840-lang/Breeze-plugin-JmComic-change",
     updateUrl:
       "https://api.github.com/repos/kl5212840-lang/Breeze-plugin-JmComic-change/releases/latest",

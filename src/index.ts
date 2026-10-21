@@ -2543,7 +2543,7 @@ async function searchComic(payload: JmSearchPayload = {}) {
     const data = {
       paging: {
         page,
-        pages: page,
+        pages: total > 0 ? Math.max(1, Math.ceil(total / searchPageSize)) : page,
         total,
         hasReachedMax:
           content.length === 0 ||
