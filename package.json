@@ -1,12 +1,13 @@
 {
   "name": "breeze-plugin-jm-comic",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "type": "module",
   "packageManager": "pnpm@11.10.0",
   "files": [
     "dist"
   ],
   "scripts": {
+    "test": "node --import tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit",
     "build": "pnpm typecheck && node --import tsx build/generate-version.ts && node --import tsx build/generate-manifest.ts && cross-env NODE_OPTIONS=\"--import tsx\" rspack build && node --import tsx build/generate-brotli.ts",
     "dev": "pnpm dev:serve",

@@ -1,11 +1,12 @@
-import { setJwtToken } from "./state";
+import { assertCurrentSession, currentSessionRevision, setJwtToken } from "./state";
 import type { JmRequestConfig, RequestPayload } from "./types";
 import { nowTs, toQueryString } from "./utils";
 
-export async function buildRequestConfig(input: RequestPayload): Promise<{
+export async function buildRequestConfig(input: RequestPayload, revision = currentSessionRevision()): Promise<{
   config: JmRequestConfig;
   cacheEnabled: boolean;
 }> {
+  assertCurrentSession(revision);
   const method = String(input.method || "GET").toUpperCase();
   const url = String(input.path || input.url || "").trim();
   if (!url) {
@@ -15,7 +16,7 @@ export async function buildRequestConfig(input: RequestPayload): Promise<{
   const headers: Record<string, string> = {};
   const inputJwt = String(input.jwtToken || "").trim();
   if (inputJwt) {
-    await setJwtToken(inputJwt);
+    await setJwtToken(inputJwt, revision);
   }
 
   let body = input.data;
@@ -41,6 +42,7 @@ export async function buildRequestConfig(input: RequestPayload): Promise<{
       ts: nowTs(),
       cacheEnabled,
       useJwt: input.useJwt !== false,
+      sessionRevision: revision,
     },
   };
 

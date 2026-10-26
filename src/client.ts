@@ -2,13 +2,15 @@ import type { AxiosResponse } from "axios";
 import axios from "axios";
 import { decodeResponsePayload } from "./codec";
 import { Config } from "./constants";
-import { resolveServerMessage, toFriendlyError } from "./errors";
+import { JmRequestError, resolveServerMessage, toFriendlyError } from "./errors";
 import {
   cacheKeyFromConfig,
   getCachedResponse,
   getJwtToken,
   getUserAgent,
   setJwtToken,
+  assertCurrentSession,
+  currentSessionRevision,
 } from "./state";
 import type { JmMeta, JmRequestConfig } from "./types";
 import { getHost, md5Hex, nowTs } from "./utils";
@@ -61,14 +63,9 @@ function isLoginRequest(url: unknown): boolean {
 
 function looksLikeCredentialError(message: string): boolean {
   const text = message.toLowerCase();
-  return (
-    text.includes("账号") ||
-    text.includes("帳號") ||
-    text.includes("用户名") ||
-    text.includes("密码") ||
-    text.includes("密碼") ||
-    text.includes("password") ||
-    text.includes("credential")
+  return /登录失败|登入失敗|登入失败|登錄失敗|authentication failed/.test(text) || (
+    /账号|帳號|用户名|用戶名|密码|密碼|password|credential/.test(text) &&
+    /错误|錯誤|失败|失敗|不正确|不正確|不對|不存在|无效|無效|停用|incorrect|invalid|wrong|disabled|banned/.test(text)
   );
 }
 
@@ -83,12 +80,15 @@ export function createJmClient() {
   ): Promise<AxiosResponse> {
     const cfg = response.config as JmRequestConfig;
     const meta = cfg.__jmMeta;
+    const revision = meta?.sessionRevision ?? currentSessionRevision();
+    assertCurrentSession(revision);
 
     const decoded = await decodeResponsePayload(
       response.data,
       meta?.ts || nowTs(),
     );
     const status = Number(response.status || 0);
+    assertCurrentSession(revision);
 
     if (status < 200 || status >= 300) {
       console.warn(`[jm.http] request failed status=${status || "unknown"}`);
@@ -98,20 +98,23 @@ export function createJmClient() {
       );
       if (isLoginRequest(cfg.url)) {
         if (status === 401 || looksLikeCredentialError(serverMsg)) {
-          throw new Error(serverMsg || "账号或密码错误");
+          throw new JmRequestError(serverMsg || "账号或密码错误");
         }
-        throw new Error(serverMsg || "登录失败");
+        throw new JmRequestError(serverMsg || "登录失败", status === 429 || status >= 500);
       }
       if (status === 401 || serverMsg === "請先登入會員") {
-        throw await buildUnauthorizedError("登录过期，请重新登录");
+        const error = await buildUnauthorizedError("登录过期，请重新登录");
+        assertCurrentSession(revision);
+        throw error;
       }
-      throw new Error(serverMsg);
+      throw new JmRequestError(serverMsg, status === 429 || status >= 500);
     }
 
     if (isLoginRequest(cfg.url)) {
       const serverMsg = resolveServerMessage(decoded, "");
       if (looksLikeCredentialError(serverMsg)) {
         console.warn("[jm.login] credentials rejected");
+        throw new JmRequestError(serverMsg);
       }
     }
 
@@ -120,7 +123,7 @@ export function createJmClient() {
         (decoded as Record<string, unknown>).jwttoken || "",
       ).trim();
       if (nextJwt) {
-        await setJwtToken(nextJwt);
+        await setJwtToken(nextJwt, revision);
       }
     }
 
@@ -152,7 +155,11 @@ export function createJmClient() {
       ts: nowTs(),
       cacheEnabled: false,
       useJwt: true,
+      sessionRevision: currentSessionRevision(),
     };
+    const revision = meta.sessionRevision ?? currentSessionRevision();
+    meta.sessionRevision = revision;
+    assertCurrentSession(revision);
 
     const token = await md5Hex(`${meta.ts}${Config.JM_VERSION}`);
     const authHeaders: Record<string, string> = {
@@ -167,11 +174,13 @@ export function createJmClient() {
     }
 
     if (meta.useJwt) {
-      const jwt = await getJwtToken();
+      const jwt = await getJwtToken(revision);
       if (jwt) {
         authHeaders.Authorization = `Bearer ${jwt}`;
       }
     }
+
+    assertCurrentSession(revision);
 
     cfg.headers = {
       ...(cfg.headers as Record<string, unknown>),
@@ -201,6 +210,7 @@ export function createJmClient() {
     }
 
     cfg.__jmMeta = meta;
+    assertCurrentSession(revision);
     return cfg;
   });
 

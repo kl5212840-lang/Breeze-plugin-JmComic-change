@@ -21,6 +21,7 @@
     "rspack.shared.ts",
     "src/**/*.ts",
     "src/**/*.d.ts",
-    "types/**/*.d.ts"
+    "types/**/*.d.ts",
+    "test/**/*.ts"
   ]
 }

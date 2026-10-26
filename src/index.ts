@@ -32,7 +32,7 @@ import {
 } from "./client";
 import { decodeResponsePayload } from "./codec";
 import { Config } from "./constants";
-import { toFriendlyError } from "./errors";
+import { JmRequestError, retryTransient, toFriendlyError } from "./errors";
 import { buildPluginInfo } from "./get-info";
 import { buildRequestConfig } from "./request-config";
 import {
@@ -41,6 +41,11 @@ import {
   getRuntimeEndpointCache,
   setEndpointSpeedCache,
   setRuntimeEndpointCache,
+  assertCurrentSession,
+  clearSession,
+  currentSessionRevision,
+  saveSessionValues,
+  waitForSessionWrites,
 } from "./state";
 import type { EndpointSpeedRecord } from "./state";
 import type { RequestPayload } from "./types";
@@ -223,19 +228,28 @@ async function fetchImageBytes({
   );
 }
 
-async function jmRequest(input: RequestPayload) {
+async function jmRequest(
+  input: RequestPayload,
+  revision = currentSessionRevision(),
+) {
+  await waitForSessionWrites(revision);
   const resolvedJwtToken =
-    String(input.jwtToken ?? "").trim() ||
-    String(await loadPluginSetting("auth.jwt", "")).trim();
+    input.useJwt === false
+      ? ""
+      : String(input.jwtToken ?? "").trim() ||
+        String(await loadPluginSetting("auth.jwt", "")).trim();
+  assertCurrentSession(revision);
   const { config, cacheEnabled } = await buildRequestConfig({
     ...input,
     jwtToken: resolvedJwtToken,
-  });
+  }, revision);
 
   try {
     const response = await jmClient.request(config);
+    assertCurrentSession(revision);
     return response.data;
   } catch (err) {
+    assertCurrentSession(revision);
     if (
       cacheEnabled &&
       String(config.method || "GET").toUpperCase() === "GET"
@@ -246,6 +260,7 @@ async function jmRequest(input: RequestPayload) {
         params: config.params as Record<string, unknown> | undefined,
         data: config.data,
       });
+      assertCurrentSession(revision);
       if (cached !== null && cached !== undefined) {
         return cached;
       }
@@ -972,7 +987,7 @@ async function loadPluginSetting(key: string, fallback: unknown) {
 
 async function isJmLoggedIn(): Promise<boolean> {
   const jwt = String(await loadPluginSetting("auth.jwt", "")).trim();
-  return jwt.length > 0;
+  return jwt.length > 0 && jwt !== "null" && jwt !== "undefined";
 }
 
 /**
@@ -1291,8 +1306,11 @@ async function getSettingsBundle(): Promise<SettingsBundleContract> {
 }
 
 async function getUserInfoBundle(): Promise<UserInfoBundleContract> {
+  const revision = currentSessionRevision();
+  await waitForSessionWrites(revision);
   const ensureUserInfo = async () => {
     const stored = await loadPluginSetting("auth.userInfo", {});
+    assertCurrentSession(revision);
     const current =
       stored && typeof stored === "object"
         ? (stored as Record<string, any>)
@@ -1315,18 +1333,16 @@ async function getUserInfoBundle(): Promise<UserInfoBundleContract> {
       formData: { username: account, password },
       cache: false,
       useJwt: false,
-    })) as Record<string, any>;
-    await Promise.all([
-      pluginConfig.save("auth.userInfo", JSON.stringify(refreshed)),
-      pluginConfig.save(
-        "auth.jwt",
-        JSON.stringify(String(refreshed?.jwttoken ?? "")),
-      ),
-    ]);
+    }, revision)) as Record<string, any>;
+    await saveSessionValues(revision, {
+      "auth.userInfo": refreshed,
+      "auth.jwt": String(refreshed?.jwttoken ?? ""),
+    });
     return refreshed;
   };
 
   const user = await ensureUserInfo();
+  assertCurrentSession(revision);
 
   const username = String(user.username ?? user.nickname ?? "").trim();
   if (!username) {
@@ -1402,7 +1418,11 @@ setUnauthorizedSchemeProvider(async () => {
   return bundle as Record<string, unknown>;
 });
 
-async function loginWithPassword(payload: JmLoginPayload = {}) {
+async function loginWithPassword(
+  payload: JmLoginPayload = {},
+  revision = currentSessionRevision(),
+) {
+  await waitForSessionWrites(revision);
   const account = String(payload.account ?? "").trim();
   const password = String(payload.password ?? "");
   if (!account || !password) {
@@ -1417,19 +1437,20 @@ async function loginWithPassword(payload: JmLoginPayload = {}) {
       method: "POST",
       formData: { username: account, password },
       useJwt: false,
-    });
+    }, revision);
   } catch (error) {
     console.warn("[jm.login] request failed");
     throw error;
   }
 
   const jwtToken = String((result as any)?.jwttoken ?? "");
-  await Promise.all([
-    pluginConfig.save("auth.account", JSON.stringify(account)),
-    pluginConfig.save("auth.password", JSON.stringify(password)),
-    pluginConfig.save("auth.jwt", JSON.stringify(jwtToken)),
-    pluginConfig.save("auth.userInfo", JSON.stringify(result)),
-  ]);
+  await saveSessionValues(revision, {
+    "auth.account": account,
+    "auth.password": password,
+    "auth.jwt": jwtToken,
+    "auth.userInfo": result,
+  });
+  assertCurrentSession(revision);
 
   return {
     source: JM_PLUGIN_ID,
@@ -1444,16 +1465,6 @@ async function loginWithPassword(payload: JmLoginPayload = {}) {
 
 let jmInitStarted = false;
 let jmAuthFlowRunning = false;
-
-function randomRetryDelayMs() {
-  const min = 20_000;
-  const max = 300_000;
-  return Math.floor(min + Math.random() * (max - min));
-}
-
-function waitMs(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
-}
 
 function normalizeBaseBaseUrl(url: string): string {
   const raw = String(url || "").trim();
@@ -1658,26 +1669,25 @@ async function resolveFastestBases() {
   return { data };
 }
 
-async function tryJmCheckin() {
+async function tryJmCheckin(revision = currentSessionRevision()) {
+  await waitForSessionWrites(revision);
   const stored = await loadPluginSetting("auth.userInfo", {});
+  assertCurrentSession(revision);
   const uid = stored?.uid;
   if (!uid) {
     console.error("无法获取用户UID，跳过签到");
     return false;
   }
 
-  const maxRetries = 3;
-  let retryCount = 0;
-
-  while (retryCount <= maxRetries) {
-    try {
+  try {
+    return await retryTransient(async () => {
       const dailyListRes = await jmRequest({
         url: `${Config.baseUrl}/daily_list/filter`,
         method: "POST",
         formData: {
           data: String(new Date().getFullYear()),
         },
-      });
+      }, revision);
 
       const list = dailyListRes?.data?.list ?? dailyListRes?.list ?? [];
       if (!Array.isArray(list) || list.length === 0) {
@@ -1698,11 +1708,12 @@ async function tryJmCheckin() {
           user_id: uid,
           daily_id: dailyId,
         },
-      });
+      }, revision);
 
       let msg = String(chkRes?.data?.msg ?? chkRes?.msg ?? "");
 
       msg = await opencc.convert(msg, "t2s.json");
+      assertCurrentSession(revision);
 
       if (msg !== "今天已经签到过了") {
         try {
@@ -1714,18 +1725,12 @@ async function tryJmCheckin() {
       }
 
       return true;
-    } catch (error) {
-      console.warn("[jm.checkin] request failed");
-      retryCount++;
-      if (retryCount > maxRetries) {
-        console.error("禁漫签到失败");
-        return false;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1000));
-    }
+    }, () => assertCurrentSession(revision));
+  } catch (_) {
+    assertCurrentSession(revision);
+    console.warn("[jm.checkin] request failed; stopped");
+    return false;
   }
-
-  return false;
 }
 
 async function checkInToday() {
@@ -1811,43 +1816,38 @@ function formatNotificationText(value: unknown): string {
     .trim();
 }
 
-async function runJmAuthAndCheckInLoop() {
+export async function runJmAuthAndCheckInLoop() {
   if (jmAuthFlowRunning) {
     return;
   }
   jmAuthFlowRunning = true;
+  const revision = currentSessionRevision();
   try {
-    while (true) {
-      try {
-        const account = String(
-          await loadPluginSetting("auth.account", ""),
-        ).trim();
-        const password = String(await loadPluginSetting("auth.password", ""));
+    await waitForSessionWrites(revision);
+    const account = String(
+      await loadPluginSetting("auth.account", ""),
+    ).trim();
+    const password = String(await loadPluginSetting("auth.password", ""));
 
-        if (!account || !password) {
-          console.info("[jm.init] skip auth/checkin: no credentials");
-          return;
-        }
-
-        await loginWithPassword({
-          account,
-          password,
-          path: `${Config.baseUrl}/login`,
-        });
-
-        const checkedIn = await tryJmCheckin();
-        if (!checkedIn) {
-          throw new Error("checkin failed");
-        }
-
-        console.info("[jm.init] login + checkin ok");
-        return;
-      } catch (error) {
-        const delay = randomRetryDelayMs();
-        console.warn(`[jm.init] login/checkin failed; retry in ${delay}ms`);
-        await waitMs(delay);
-      }
+    if (!account || !password) {
+      console.info("[jm.init] skip auth/checkin: no credentials");
+      return;
     }
+
+    await retryTransient(
+      () => loginWithPassword({ account, password }, revision),
+      () => assertCurrentSession(revision),
+    );
+
+    const checkedIn = await tryJmCheckin(revision);
+    if (!checkedIn) {
+      console.warn("[jm.init] checkin incomplete; stopped");
+      return;
+    }
+
+    console.info("[jm.init] login + checkin ok");
+  } catch (_) {
+    console.warn("[jm.init] login/checkin incomplete; stopped");
   } finally {
     jmAuthFlowRunning = false;
   }
@@ -2283,12 +2283,7 @@ async function getTimeRankingFilterBundle(
 }
 
 async function clearPluginSession() {
-  await Promise.all([
-    pluginConfig.save("auth.account", JSON.stringify("")),
-    pluginConfig.save("auth.password", JSON.stringify("")),
-    pluginConfig.save("auth.jwt", JSON.stringify("")),
-    pluginConfig.save("auth.userInfo", JSON.stringify({})),
-  ]);
+  await clearSession();
 
   return {
     ok: true,
@@ -3043,8 +3038,19 @@ async function toggleFavorite(
   });
 
 
-  if (res?.msg?.includes("已满")) {
-    flutterTools.showToast({ message: "收藏数已达上限", level: "warning" });
+  const result = toStringMap(res);
+  const body = toStringMap(result.data);
+  const message = String(body.msg ?? result.msg ?? "");
+  if (/已[满滿]/.test(message)) {
+    throw new JmRequestError("收藏数已达上限");
+  }
+  const status = body.status ?? result.status;
+  if (
+    status === false ||
+    status === 0 ||
+    ["error", "fail", "failed"].includes(String(status).toLowerCase())
+  ) {
+    throw new JmRequestError(message || "收藏操作未完成");
   }
 
   const favorited = !toBool(payload.currentFavorite, false);

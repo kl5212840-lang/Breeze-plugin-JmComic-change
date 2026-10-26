@@ -18,6 +18,7 @@ export type JmMeta = {
   cacheKey?: string;
   useJwt: boolean;
   fromCache?: boolean;
+  sessionRevision?: number;
 };
 
 export type JmRequestConfig = InternalAxiosRequestConfig & {

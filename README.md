@@ -21,3 +21,5 @@
 ## 开发
 
 运行 `pnpm install --frozen-lockfile` 和 `pnpm build`；构建产物在 `dist/`。源码与原项目的历史保留在本 fork 中，修改重点见 `src/get-info.ts`、`src/index.ts` 和 `src/client.ts`。
+
+离线回归运行 `pnpm test`，使用内存存储和本地 Axios 适配器，不会登录账号或写入真实收藏。覆盖空缓存、清理会话与在途响应、收藏失败状态，以及登录和签到的有限重试。自动登录与签到各最多尝试三次；明确凭据错误立即停止，临时网络错误延迟后重试。清理会话保留设备标识与线路设置。

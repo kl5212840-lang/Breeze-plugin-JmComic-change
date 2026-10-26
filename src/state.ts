@@ -6,6 +6,67 @@ import { randomDeviceId } from "./utils";
 let fallbackDeviceId = "";
 let fallbackJwt = "";
 let fallbackUa = "";
+let sessionRevision = 0;
+let sessionWrites = Promise.resolve();
+
+export class SessionChangedError extends Error {
+  constructor() {
+    super("会话已变更，请重新操作");
+    this.name = "SessionChangedError";
+  }
+}
+
+export function currentSessionRevision() {
+  return sessionRevision;
+}
+
+export function assertCurrentSession(revision: number) {
+  if (revision !== sessionRevision) throw new SessionChangedError();
+}
+
+export async function waitForSessionWrites(revision: number) {
+  await sessionWrites;
+  assertCurrentSession(revision);
+}
+
+function writeSession(revision: number, write: () => Promise<void>) {
+  const task = sessionWrites.then(async () => {
+    assertCurrentSession(revision);
+    await write();
+    assertCurrentSession(revision);
+  });
+  sessionWrites = task.catch(() => {});
+  return task;
+}
+
+export function saveSessionValues(
+  revision: number,
+  values: Record<string, unknown>,
+) {
+  return writeSession(revision, async () => {
+    await Promise.all(Object.entries(values).map(([key, value]) =>
+      pluginConfig.save(key, JSON.stringify(value)),
+    ));
+  });
+}
+
+export function clearSession() {
+  const revision = ++sessionRevision;
+  fallbackJwt = "";
+  // Queue clearing after any already-started write. Late responses retain
+  // their old revision and cannot restore either settings or the cached JWT.
+  return writeSession(revision, async () => {
+    await Promise.all([
+      cacheDelete(scopedKey("jwt")),
+      ...Object.entries({
+        "auth.account": "",
+        "auth.password": "",
+        "auth.jwt": "",
+        "auth.userInfo": {},
+      }).map(([key, value]) => pluginConfig.save(key, JSON.stringify(value))),
+    ]);
+  });
+}
 
 type RuntimeEndpointCache = {
   apiBaseUrl: string;
@@ -30,7 +91,14 @@ function scopedKey(key: string): string {
 }
 
 async function getCachedString(key: string) {
-  return String(await cache.get(scopedKey(key))).trim();
+  const value = await cache.get<unknown>(scopedKey(key), null);
+  return normalizedString(value);
+}
+
+function normalizedString(value: unknown) {
+  if (typeof value !== "string") return "";
+  const text = value.trim();
+  return text === "null" || text === "undefined" ? "" : text;
 }
 
 async function setCachedString(key: string, value: string) {
@@ -51,8 +119,10 @@ export async function getDeviceId() {
   return fallbackDeviceId;
 }
 
-export async function getJwtToken() {
+export async function getJwtToken(revision = currentSessionRevision()) {
+  await waitForSessionWrites(revision);
   const cached = await getCachedString("jwt");
+  assertCurrentSession(revision);
   if (cached) {
     fallbackJwt = cached;
     return cached;
@@ -60,10 +130,12 @@ export async function getJwtToken() {
   return fallbackJwt;
 }
 
-export async function setJwtToken(token: string) {
-  const normalized = String(token || "").trim();
-  fallbackJwt = normalized;
-  await setCachedString("jwt", normalized);
+export function setJwtToken(token: string, revision = currentSessionRevision()) {
+  return writeSession(revision, async () => {
+    const normalized = normalizedString(token);
+    fallbackJwt = normalized;
+    await setCachedString("jwt", normalized);
+  });
 }
 
 function generateAndroidUserAgent(deviceId: string) {
